@@ -86,10 +86,10 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    func deleteMessage(_ msg: VKMessage, token: String) async throws {
+    func deleteMessage(_ msg: VKMessage, token: String, deleteForAll: Bool = false) async throws {
         deleteInProgress.insert(msg.id)
         do {
-            try await vkApi.deleteMessages(token: token, messageIds: [msg.id], deleteForAll: false)
+            try await vkApi.deleteMessages(token: token, messageIds: [msg.id], deleteForAll: deleteForAll)
             messages.removeAll { $0.id == msg.id }
             totalCount = max(0, totalCount - 1)
             deleteInProgress.remove(msg.id)

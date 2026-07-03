@@ -1332,6 +1332,53 @@ final class VKApiService: Sendable {
         return first
     }
 
+    // MARK: - messages.getConversationMembers
+
+    /// Участники беседы (peer_id >= 2_000_000_000). Возвращает member_id, is_admin, is_owner + profiles/groups.
+    func getConversationMembers(token: String, peerId: Int) async throws -> ConversationMembersResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "peer_id", value: String(peerId)),
+            URLQueryItem(name: "fields", value: "photo_50")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/messages.getConversationMembers") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "messages.getConversationMembers peerId=\(peerId)")
+        let response = try await requestVK(ConversationMembersResponse.self, from: request)
+        logger?.info("VKApi", "messages.getConversationMembers ok count=\(response.count)")
+        return response
+    }
+
+    // MARK: - account.saveProfileInfo
+
+    func saveProfileInfo(token: String, firstName: String? = nil, lastName: String? = nil, status: String? = nil) async throws -> Bool {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        var bodyItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion)
+        ]
+        if let v = firstName  { bodyItems.append(URLQueryItem(name: "first_name", value: v)) }
+        if let v = lastName   { bodyItems.append(URLQueryItem(name: "last_name",  value: v)) }
+        if let v = status     { bodyItems.append(URLQueryItem(name: "status",     value: v)) }
+        guard let url = URL(string: "\(baseURL)/account.saveProfileInfo") else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = bodyItems.compactMap { item -> String? in
+            guard let val = item.value else { return nil }
+            let enc = val.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? val
+            return "\(item.name)=\(enc)"
+        }.joined(separator: "&")
+        request.httpBody = body.data(using: .utf8)
+        let result = try await requestVK(SaveProfileInfoResult.self, from: request)
+        return result.changed == 1
+    }
+
     // MARK: - account.getCounters
 
     func getAccountCounters(token: String) async throws -> AccountCounters {

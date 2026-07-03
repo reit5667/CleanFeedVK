@@ -21,6 +21,7 @@ struct ProfileView: View {
     @State private var showPhotos = false
     @State private var showGroups = false
     @State private var showInfo = false
+    @State private var showEditProfile = false
 
     private let vkApi = VKApiService()
 
@@ -85,6 +86,13 @@ struct ProfileView: View {
         }
         .navigationDestination(isPresented: $showGroups) {
             groupsScreen(user: user)
+        }
+        .sheet(isPresented: $showEditProfile) {
+            if let token = authService.accessToken {
+                EditProfileView(token: token, user: user) {
+                    viewModel.refreshAll()
+                }
+            }
         }
     }
 
@@ -323,7 +331,7 @@ struct ProfileView: View {
     private func actionButtonsRow(user: VKUserDetail) -> some View {
         VStack(spacing: 6) {
             if isOwnProfile {
-                Button { } label: {
+                Button { showEditProfile = true } label: {
                     Text("Редактировать")
                         .font(VKTheme.TextStyle.profileAction)
                         .foregroundStyle(VKTheme.Colors.primary)

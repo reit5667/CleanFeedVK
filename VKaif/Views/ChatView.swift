@@ -45,6 +45,11 @@ struct ChatView: View {
     @State private var showStickerPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @FocusState private var inputFocused: Bool
+    @State private var showMembersSheet = false
+    @State private var membersData: ConversationMembersResponse? = nil
+    @State private var membersLoading = false
+    @State private var pendingDeleteMsg: VKMessage? = nil
+    @State private var showDeleteDialog = false
 
     private let vkApi = VKApiService()
 
@@ -124,7 +129,7 @@ struct ChatView: View {
         .vkBlueNavBar()
         .toolbar {
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
+                let titleContent = HStack(spacing: 8) {
                     if let url = chatAvatarURL {
                         AsyncImage(url: url) { phase in
                             switch phase {
@@ -138,6 +143,12 @@ struct ChatView: View {
                     Text(chatTitle)
                         .font(.headline)
                         .foregroundColor(.white)
+                }
+                if peerId >= 2_000_000_000 {
+                    Button { loadAndShowMembers() } label: { titleContent }
+                        .buttonStyle(.plain)
+                } else {
+                    titleContent
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -181,6 +192,20 @@ struct ChatView: View {
                 authService: authService,
                 vkApi: vkApi
             )
+        }
+        .sheet(isPresented: $showMembersSheet) {
+            membersSheet
+        }
+        .confirmationDialog("Удалить сообщение?", isPresented: $showDeleteDialog, titleVisibility: .visible) {
+            Button("Удалить для всех", role: .destructive) {
+                if let msg = pendingDeleteMsg { deleteMessage(msg, forAll: true) }
+                pendingDeleteMsg = nil
+            }
+            Button("Удалить для себя", role: .destructive) {
+                if let msg = pendingDeleteMsg { deleteMessage(msg, forAll: false) }
+                pendingDeleteMsg = nil
+            }
+            Button("Отмена", role: .cancel) { pendingDeleteMsg = nil }
         }
         .alert("Переслать сообщение", isPresented: $showForwardStub) {
             Button("OK", role: .cancel) { }
@@ -478,11 +503,16 @@ struct ChatView: View {
                         }
                     }
                 }
-                if isOut {
-                    Divider()
-                    Button(role: .destructive) { deleteMessage(msg) } label: {
-                        Label("Удалить", systemImage: "trash")
+                Divider()
+                Button(role: .destructive) {
+                    if isOut {
+                        pendingDeleteMsg = msg
+                        showDeleteDialog = true
+                    } else {
+                        deleteMessage(msg)
                     }
+                } label: {
+                    Label("Удалить", systemImage: "trash")
                 }
             }
             if !isOut {
@@ -496,12 +526,15 @@ struct ChatView: View {
         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if isOut {
-                Button(role: .destructive) {
+            Button(role: .destructive) {
+                if isOut {
+                    pendingDeleteMsg = msg
+                    showDeleteDialog = true
+                } else {
                     deleteMessage(msg)
-                } label: {
-                    Label("Удалить", systemImage: "trash")
                 }
+            } label: {
+                Label("Удалить", systemImage: "trash")
             }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -918,11 +951,96 @@ struct ChatView: View {
         .background(Color(.systemGray5))
     }
 
-    private func deleteMessage(_ msg: VKMessage) {
+    private func loadAndShowMembers() {
+        guard let token = authService.accessToken, !membersLoading else {
+            showMembersSheet = true
+            return
+        }
+        membersLoading = true
+        showMembersSheet = true
+        Task {
+            do {
+                let result = try await vkApi.getConversationMembers(token: token, peerId: peerId)
+                await MainActor.run {
+                    membersData = result
+                    membersLoading = false
+                }
+            } catch {
+                await MainActor.run { membersLoading = false }
+            }
+        }
+    }
+
+    private var membersSheet: some View {
+        NavigationStack {
+            Group {
+                if membersLoading && membersData == nil {
+                    ProgressView("Загрузка…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let data = membersData {
+                    let profiles = data.profiles ?? []
+                    List(data.items, id: \.memberId) { member in
+                        let profile = profiles.first(where: { $0.id == member.memberId })
+                        HStack(spacing: 12) {
+                            if let urlStr = profile?.photo50, let url = URL(string: urlStr) {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let img): img.resizable().scaledToFill()
+                                    default: Color(.systemGray4)
+                                    }
+                                }
+                                .frame(width: 40, height: 40)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            } else {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 40, height: 40)
+                                    .overlay(Image(systemName: "person.fill").foregroundStyle(.white))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                let name: String = {
+                                    guard let p = profile else { return "ID\(member.memberId)" }
+                                    let n = [p.firstName, p.lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+                                    return n.isEmpty ? "ID\(member.memberId)" : n
+                                }()
+                                Text(name)
+                                    .font(VKTheme.TextStyle.dialogName)
+                                    .foregroundStyle(VKTheme.Colors.textPrimary)
+                                if member.isAdmin == true {
+                                    Text("Администратор")
+                                        .font(VKTheme.TextStyle.timestamp)
+                                        .foregroundStyle(VKTheme.Colors.primary)
+                                } else if member.isOwner == true {
+                                    Text("Создатель")
+                                        .font(VKTheme.TextStyle.timestamp)
+                                        .foregroundStyle(VKTheme.Colors.primary)
+                                }
+                            }
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                    .listStyle(.plain)
+                } else {
+                    ContentUnavailableView("Нет данных", systemImage: "person.2")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .navigationTitle("Участники беседы")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Готово") { showMembersSheet = false }
+                }
+            }
+        }
+    }
+
+    private func deleteMessage(_ msg: VKMessage, forAll: Bool = false) {
         guard let token = authService.accessToken else { return }
         Task {
             do {
-                try await viewModel.deleteMessage(msg, token: token)
+                try await viewModel.deleteMessage(msg, token: token, deleteForAll: forAll)
             } catch {
                 sendError = "Ошибка удаления: \(error.localizedDescription)"
             }

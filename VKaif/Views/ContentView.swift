@@ -49,6 +49,12 @@ struct ContentView: View {
     @State private var lastFeedLoadDate: Date? = nil
     /// Инкремент при ручном «Обновить» — ScrollViewReader реагирует и прокручивает вверх.
     @State private var feedScrollToTopTrigger = 0
+    /// Новые посты ожидают подтверждения пользователя (баннер «Показать N новых записей»).
+    @State private var pendingFeedPosts: [VKPost] = []
+    @State private var pendingFeedProfiles: [VKProfile] = []
+    @State private var pendingFeedGroups: [VKGroup] = []
+    @State private var pendingNextFrom: String? = nil
+    @State private var pendingNewPostsCount: Int = 0
 
     private let vkApi = VKApiService()
     private let feedFilter = FeedFilter(blacklistKeywords: []) // позже — настройки
@@ -275,6 +281,11 @@ struct ContentView: View {
                     feedGroups = []
                     nextFrom = nil
                     currentUserId = nil
+                    pendingFeedPosts = []
+                    pendingFeedProfiles = []
+                    pendingFeedGroups = []
+                    pendingNextFrom = nil
+                    pendingNewPostsCount = 0
                     activeSection = .feed
                 } label: {
                     Label("Выйти из аккаунта", systemImage: "rectangle.portrait.and.arrow.right")
@@ -417,6 +428,23 @@ struct ContentView: View {
                     .padding(8)
                     .background(.ultraThinMaterial)
                     .cornerRadius(8)
+            }
+        }
+        .overlay(alignment: .top) {
+            if pendingNewPostsCount > 0 && !feedLoadState.isLoading {
+                Button { applyPendingFeed() } label: {
+                    Text(newPostsBannerText(pendingNewPostsCount))
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(VKTheme.Colors.primary)
+                        .clipShape(Capsule())
+                }
+                .padding(.top, 8)
+                .shadow(radius: 4)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.spring(duration: 0.3), value: pendingNewPostsCount)
             }
         }
         .alert("Репост в личку", isPresented: $showRepostDMStub) {
@@ -727,10 +755,12 @@ struct ContentView: View {
 
     // MARK: - Загрузка ленты
 
-    /// Первая загрузка или обновление (заменяет ленту). Возвращает Task — можно await для refreshable.
+    /// Первая загрузка или обновление. При наличии постов новые идут в pending (баннер), при пустой ленте — прямо.
     @discardableResult
     private func loadFeed() -> Task<Void, Never> {
         guard let token = authService.accessToken else { return Task {} }
+        let isInitialLoad = feedPosts.isEmpty
+        let existingIds = Set(feedPosts.map(\.postId))
         feedLoadState = .loading
         return Task {
             do {
@@ -745,13 +775,37 @@ struct ContentView: View {
                     await MainActor.run { currentUserId = first.id }
                 }
                 let enriched = await enrichPhotoStubs(in: filtered, token: token)
-                await MainActor.run {
-                    feedPosts = enriched
-                    feedProfiles = response.profiles ?? []
-                    feedGroups = response.groups ?? []
-                    nextFrom = response.nextFrom
-                    feedLoadState = .loaded(count: enriched.count)
-                    lastFeedLoadDate = Date()
+                if isInitialLoad {
+                    await MainActor.run {
+                        feedPosts = enriched
+                        feedProfiles = response.profiles ?? []
+                        feedGroups = response.groups ?? []
+                        nextFrom = response.nextFrom
+                        feedLoadState = .loaded(count: enriched.count)
+                        lastFeedLoadDate = Date()
+                    }
+                } else {
+                    let newCount = enriched.filter { !existingIds.contains($0.postId) }.count
+                    if newCount == 0 {
+                        await MainActor.run {
+                            feedPosts = enriched
+                            feedProfiles = response.profiles ?? []
+                            feedGroups = response.groups ?? []
+                            nextFrom = response.nextFrom
+                            feedLoadState = .loaded(count: enriched.count)
+                            lastFeedLoadDate = Date()
+                        }
+                    } else {
+                        await MainActor.run {
+                            pendingFeedPosts = enriched
+                            pendingFeedProfiles = response.profiles ?? []
+                            pendingFeedGroups = response.groups ?? []
+                            pendingNextFrom = response.nextFrom
+                            pendingNewPostsCount = newCount
+                            feedLoadState = .loaded(count: enriched.count)
+                            lastFeedLoadDate = Date()
+                        }
+                    }
                 }
                 if let counters = try? await vkApi.getAccountCounters(token: token) {
                     await MainActor.run { unreadMessagesCount = counters.messages ?? 0 }
@@ -763,6 +817,36 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// Применяет отложенные посты из pending и прокручивает вверх.
+    private func applyPendingFeed() {
+        guard !pendingFeedPosts.isEmpty else { return }
+        feedPosts = pendingFeedPosts
+        feedProfiles = pendingFeedProfiles
+        feedGroups = pendingFeedGroups
+        nextFrom = pendingNextFrom
+        pendingFeedPosts = []
+        pendingFeedProfiles = []
+        pendingFeedGroups = []
+        pendingNextFrom = nil
+        pendingNewPostsCount = 0
+        feedScrollToTopTrigger += 1
+    }
+
+    private func newPostsBannerText(_ count: Int) -> String {
+        let n = count % 100
+        let suffix: String
+        if (11...14).contains(n) {
+            suffix = "новых записей"
+        } else {
+            switch n % 10 {
+            case 1: suffix = "новую запись"
+            case 2, 3, 4: suffix = "новые записи"
+            default: suffix = "новых записей"
+            }
+        }
+        return "Показать \(count) \(suffix)"
     }
 
     /// Подгрузка следующей страницы в конец ленты.

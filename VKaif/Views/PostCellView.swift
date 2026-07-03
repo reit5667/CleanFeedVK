@@ -485,20 +485,20 @@ struct PostCellView: View {
     }
 
     private func row2(_ a: PhotoGridItem, _ b: PhotoGridItem, h: CGFloat, extra2: Int) -> some View {
-        HStack(spacing: 4) {
+        let cols = [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)]
+        return LazyVGrid(columns: cols, spacing: 0) {
             gridCell(a, height: h, extra: 0)
             gridCell(b, height: h, extra: extra2)
         }
-        .frame(maxWidth: .infinity)
     }
 
     private func row3(_ a: PhotoGridItem, _ b: PhotoGridItem, _ c: PhotoGridItem, h: CGFloat, extra3: Int) -> some View {
-        HStack(spacing: 4) {
+        let cols = [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)]
+        return LazyVGrid(columns: cols, spacing: 0) {
             gridCell(a, height: h, extra: 0)
             gridCell(b, height: h, extra: 0)
             gridCell(c, height: h, extra: extra3)
         }
-        .frame(maxWidth: .infinity)
     }
 
     /// Одиночное фото в посте: scaledToFit без обрезки, высота по содержимому (max singlePhotoMaxHeight).

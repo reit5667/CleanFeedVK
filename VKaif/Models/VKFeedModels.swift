@@ -1295,3 +1295,38 @@ struct AccountCounters: Decodable {
         case messages
     }
 }
+
+// MARK: - messages.getConversationMembers
+
+struct ConversationMember: Decodable {
+    let memberId: Int
+    let invitedBy: Int?
+    let joinDate: Int?
+    let isAdmin: Bool?
+    let isOwner: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case memberId = "member_id"
+        case invitedBy = "invited_by"
+        case joinDate = "join_date"
+        case isAdmin = "is_admin"
+        case isOwner = "is_owner"
+    }
+}
+
+struct ConversationMembersResponse: Decodable {
+    let count: Int
+    let items: [ConversationMember]
+    let profiles: [VKProfile]?
+    let groups: [VKGroup]?
+
+    enum CodingKeys: String, CodingKey {
+        case count, items, profiles, groups
+    }
+}
+
+// MARK: - account.saveProfileInfo
+
+struct SaveProfileInfoResult: Decodable {
+    let changed: Int
+}
