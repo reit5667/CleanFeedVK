@@ -602,17 +602,10 @@ struct ProfileGroupsTabView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(filteredGroups, id: \.id) { group in
                                 NavigationLink(value: GroupDestination(groupId: group.id)) {
-                                    HStack(spacing: 12) {
-                                        groupAvatar(group)
-                                        Text(group.name ?? "Группа \(group.id)")
-                                            .font(.body)
-                                        Spacer(minLength: 0)
-                                    }
-                                    .padding(.vertical, 10)
-                                    .padding(.horizontal, 12)
+                                    groupRow(group)
                                 }
                                 Divider()
-                                    .padding(.leading, 44 + 12)
+                                    .padding(.leading, 12 + 48 + 12)
                             }
                         }
                         .background(Color(.systemBackground))
@@ -622,11 +615,29 @@ struct ProfileGroupsTabView: View {
                     }
                 } else {
                     VStack(spacing: 0) {
+                        // Счётчик "N СООБЩЕСТВ"
+                        HStack(spacing: 0) {
+                            VStack(spacing: 0) {
+                                Text("\(groups.count) СООБЩЕСТВ".uppercased())
+                                    .font(VKTheme.TextStyle.sectionHeader)
+                                    .foregroundStyle(VKTheme.Colors.primary)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                Rectangle()
+                                    .fill(VKTheme.Colors.primary)
+                                    .frame(height: 2)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        Divider()
+
+                        // Поиск
                         searchRow
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 6)
                             .background(Color(.systemGray6))
                         Divider()
+
                         ScrollView {
                             LazyVStack(spacing: 0) {
                                 ForEach(filteredGroups, id: \.id) { group in
@@ -635,7 +646,7 @@ struct ProfileGroupsTabView: View {
                                     }
                                     .buttonStyle(.plain)
                                     Divider()
-                                        .padding(.leading, 72)
+                                        .padding(.leading, 12 + 48 + 12)
                                 }
                             }
                         }
@@ -661,10 +672,18 @@ struct ProfileGroupsTabView: View {
     private func groupRow(_ group: VKGroup) -> some View {
         HStack(spacing: 12) {
             groupAvatar(group)
-            Text(group.name ?? "Группа \(group.id)")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(VKTheme.Colors.textPrimary)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(group.name ?? "Группа \(group.id)")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(VKTheme.Colors.textPrimary)
+                    .lineLimit(1)
+                if let activity = group.activity, !activity.isEmpty {
+                    Text(activity)
+                        .font(VKTheme.TextStyle.timestamp)
+                        .foregroundColor(VKTheme.Colors.textSecondary)
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 8)
         }
         .padding(.horizontal, 12)

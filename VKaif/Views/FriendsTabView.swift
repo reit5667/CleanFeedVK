@@ -181,14 +181,14 @@ struct FriendsTabView: View {
                         loadState = .loaded
                     }
                 case .outgoing:
-                    let res = try await vkApi.getFriendsRequests(token: token, count: 100, sort: 1)
+                    let res = try await vkApi.getFriendsRequests(token: token, count: 100, out: 1)
                     let users = res.items.isEmpty ? [] : try await vkApi.getUsers(token: token, userIds: res.items.map { String($0) })
                     await MainActor.run {
                         outgoingUsers = users
                         loadState = .loaded
                     }
                 case .incoming:
-                    let res = try await vkApi.getFriendsRequests(token: token, count: 100, sort: 0)
+                    let res = try await vkApi.getFriendsRequests(token: token, count: 100, out: 0)
                     let users = res.items.isEmpty ? [] : try await vkApi.getUsers(token: token, userIds: res.items.map { String($0) })
                     await MainActor.run {
                         incomingUsers = users

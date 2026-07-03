@@ -236,6 +236,31 @@ final class VKApiService: Sendable {
         return response.items.first
     }
 
+    // MARK: - photos.getAll
+
+    /// Все фото пользователя или сообщества (без указания альбома). Используется для фотостипа группы и счётчика фото.
+    func getPhotosAll(token: String, ownerId: Int, count: Int = 5, offset: Int = 0) async throws -> PhotosGetResponse {
+        guard !token.isEmpty else { throw VKApiError.missingToken }
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "v", value: apiVersion),
+            URLQueryItem(name: "owner_id", value: String(ownerId)),
+            URLQueryItem(name: "count", value: String(count)),
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "extended", value: "1"),
+            URLQueryItem(name: "photo_sizes", value: "1")
+        ]
+        guard var components = URLComponents(string: "\(baseURL)/photos.getAll") else { throw VKApiError.invalidURL }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw VKApiError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        logger?.info("VKApi", "photos.getAll ownerId=\(ownerId)")
+        let wrapper: VKResponse<PhotosGetResponse> = try await network.request(VKResponse<PhotosGetResponse>.self, from: request)
+        logger?.info("VKApi", "photos.getAll ok total=\(wrapper.response.count) loaded=\(wrapper.response.items.count)")
+        return wrapper.response
+    }
+
     // MARK: - photos.getById
 
     /// Полные данные фото по списку (ownerId_photoId). Используется для обогащения стабов из newsfeed.get.
@@ -302,12 +327,12 @@ final class VKApiService: Sendable {
 
     // MARK: - friends.getRequests
 
-    /// Заявки в друзья. sort: 0 = входящие, 1 = исходящие. Возвращает массив id.
+    /// Заявки в друзья. out: 0 = входящие (default), 1 = исходящие. Возвращает массив id.
     func getFriendsRequests(
         token: String,
         offset: Int = 0,
         count: Int = 50,
-        sort: Int = 0
+        out: Int = 0
     ) async throws -> FriendsGetRequestsResponse {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         var queryItems: [URLQueryItem] = [
@@ -315,14 +340,14 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "offset", value: String(offset)),
             URLQueryItem(name: "count", value: String(count)),
-            URLQueryItem(name: "sort", value: String(sort))
+            URLQueryItem(name: "out", value: String(out))
         ]
         guard var components = URLComponents(string: "\(baseURL)/friends.getRequests") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
         guard let url = components.url else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        logger?.info("VKApi", "friends.getRequests sort=\(sort)")
+        logger?.info("VKApi", "friends.getRequests out=\(out)")
         let response = try await requestVK(FriendsGetRequestsResponse.self, from: request)
         logger?.info("VKApi", "friends.getRequests ok count=\(response.count) items=\(response.items.count)")
         return response
@@ -371,7 +396,8 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "extended", value: String(extended)),
             URLQueryItem(name: "count", value: String(count)),
-            URLQueryItem(name: "offset", value: String(offset))
+            URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "fields", value: "activity,photo_50")
         ]
         guard var components = URLComponents(string: "\(baseURL)/groups.get") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
@@ -386,14 +412,15 @@ final class VKApiService: Sendable {
 
     // MARK: - groups.getById
 
-    /// Информация о группе по ID (положительный id, например 12345).
+    /// Информация о группе по ID (положительный id, например 12345) с расширенными полями.
     func getGroupById(token: String, groupId: Int) async throws -> VKGroup? {
         guard !token.isEmpty else { throw VKApiError.missingToken }
-        var queryItems: [URLQueryItem] = [
+        let queryItems: [URLQueryItem] = [
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "group_ids", value: String(groupId)),
-            URLQueryItem(name: "extended", value: "0")
+            URLQueryItem(name: "extended", value: "1"),
+            URLQueryItem(name: "fields", value: "description,members_count,activity,status,photo_200")
         ]
         guard var components = URLComponents(string: "\(baseURL)/groups.getById") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems
@@ -408,21 +435,34 @@ final class VKApiService: Sendable {
 
     // MARK: - groups.leave
 
-    /// Отписаться от группы (выйти из сообщества). group_id — положительный ID группы. Возвращает 1 при успехе.
+    /// Отписаться от группы (выйти из сообщества). group_id — положительный ID группы.
     func leaveGroup(token: String, groupId: Int) async throws {
         guard !token.isEmpty else { throw VKApiError.missingToken }
         guard groupId > 0 else { throw VKApiError.apiError(code: -1, message: "Некорректный ID группы") }
-        var queryItems: [URLQueryItem] = [
+        let bodyItems: [URLQueryItem] = [
             URLQueryItem(name: "access_token", value: token),
             URLQueryItem(name: "v", value: apiVersion),
             URLQueryItem(name: "group_id", value: String(groupId))
         ]
-        guard var components = URLComponents(string: "\(baseURL)/groups.leave") else { throw VKApiError.invalidURL }
-        components.queryItems = queryItems
-        guard let url = components.url else { throw VKApiError.invalidURL }
+        guard let url = URL(string: "\(baseURL)/groups.leave") else { throw VKApiError.invalidURL }
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        let _: Int = try await requestVK(Int.self, from: request)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = bodyItems.compactMap { item -> String? in
+            guard let val = item.value else { return nil }
+            let enc = val.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? val
+            return "\(item.name)=\(enc)"
+        }.joined(separator: "&")
+        request.httpBody = body.data(using: .utf8)
+        logger?.info("VKApi", "groups.leave POST groupId=\(groupId)")
+        let (data, resp) = try await network.data(for: request)
+        guard let http = resp as? HTTPURLResponse else { throw NetworkError.invalidResponse }
+        guard (200 ..< 300).contains(http.statusCode) else { throw NetworkError.httpStatus(http.statusCode, data) }
+        if let errWrapper = try? decoder.decode(VKErrorWrapper.self, from: data) {
+            let msg = errWrapper.error.errorMsg ?? "Ошибка VK \(errWrapper.error.errorCode)"
+            logger?.error("VKApi", "groups.leave API error \(errWrapper.error.errorCode): \(msg)")
+            throw VKApiError.apiError(code: errWrapper.error.errorCode, message: errWrapper.error.errorMsg)
+        }
         logger?.info("VKApi", "groups.leave ok groupId=\(groupId)")
     }
 

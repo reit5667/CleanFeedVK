@@ -701,12 +701,30 @@ struct VKGroup: Decodable {
     let id: Int
     let name: String?
     let photo50: String?
+    let photo100: String?
+    let photo200: String?
+    let description: String?
+    let membersCount: Int?
+    let activity: String?
+    let status: String?
+    let site: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case photo50 = "photo_50"
+        case photo100 = "photo_100"
+        case photo200 = "photo_200"
+        case description
+        case membersCount = "members_count"
+        case activity
+        case status
+        case site
     }
+}
+
+struct GroupsGetByIdExtendedResponse: Decodable {
+    let groups: [VKGroup]
 }
 
 // MARK: - users.get — профиль пользователя (экран профиля)

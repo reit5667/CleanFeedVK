@@ -160,7 +160,7 @@ struct PostCommentsView: View {
                 .buttonStyle(.plain)
 
                 if !comment.text.isEmpty {
-                    Text(comment.text)
+                    Text(stripVKMentions(comment.text))
                         .font(VKTheme.TextStyle.commentBody)
                         .foregroundColor(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -474,5 +474,13 @@ struct PostCommentsView: View {
         if n10 == 1 { return "минуту" }
         if n10 >= 2 && n10 <= 4 { return "минуты" }
         return "минут"
+    }
+
+    /// Заменяет VK-разметку упоминаний [id123|Имя] и [club123|Название] на отображаемое имя.
+    private func stripVKMentions(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "\\[(?:id|club|public)\\d+\\|([^\\]]+)\\]") else { return text }
+        let ns = text as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "$1")
     }
 }

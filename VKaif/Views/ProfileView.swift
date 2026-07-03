@@ -514,16 +514,8 @@ struct ProfileView: View {
     // MARK: - Экраны навигации из статблока
 
     private func friendsScreen(user: VKUserDetail) -> some View {
-        ProfileFriendsTabView(
-            friends: viewModel.friends,
-            loadState: viewModel.friendsLoadState,
-            authService: authService,
-            onRefresh: { await viewModel.loadFriends(forceRefresh: true) },
-            embeddedInScroll: false
-        )
-        .navigationTitle("Друзья")
-        .navigationBarTitleDisplayMode(.inline)
-        .vkBlueNavBar()
+        FriendsTabView(authService: authService)
+            .vkBlueNavBar()
     }
 
     private func photosScreen(user: VKUserDetail) -> some View {

@@ -13,7 +13,13 @@ struct GroupWallView: View {
     @State private var posts: [VKPost] = []
     @State private var profiles: [VKProfile] = []
     @State private var groups: [VKGroup] = []
+    @State private var groupPhotos: [VKPhoto] = []
+    @State private var totalPhotosCount: Int? = nil
+    @State private var totalAudioCount: Int? = nil
+    @State private var galleryInitialIndex: Int = 0
+    @State private var isGalleryPresented = false
     @State private var loadState: GroupWallLoadState = .idle
+    @State private var showDescription = false
     @State private var leaveInProgress = false
     @State private var leaveError: String? = nil
     @State private var commentsContext: PostCommentsContext? = nil
@@ -44,7 +50,7 @@ struct GroupWallView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .loaded:
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 0) {
                         if let g = group {
                             groupHeader(group: g)
                         }
@@ -53,7 +59,6 @@ struct GroupWallView: View {
                             Divider()
                         }
                     }
-                    .padding(.horizontal)
                 }
             case .failed(let error):
                 ContentUnavailableView(
@@ -69,12 +74,8 @@ struct GroupWallView: View {
         .toolbar {
             if case .loaded = loadState {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button(leaveInProgress ? "Отписка…" : "Отписаться") {
-                            leaveGroup()
-                        }
-                        .disabled(leaveInProgress)
-                        Button("Обновить") { load() }
+                    Button { load() } label: {
+                        Image(systemName: "arrow.clockwise")
                     }
                 }
             }
@@ -99,12 +100,222 @@ struct GroupWallView: View {
                 groupWallVideoPlayerContent(url: url)
             }
         }
+        .fullScreenCover(isPresented: $isGalleryPresented) {
+            let urls = groupPhotos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
+            if !urls.isEmpty {
+                FullScreenPhotoGalleryView(
+                    urls: urls,
+                    initialIndex: min(galleryInitialIndex, urls.count - 1),
+                    onDismiss: { isGalleryPresented = false },
+                    likesCount: nil,
+                    commentsCount: nil,
+                    isLiked: false,
+                    onLike: nil,
+                    photoCommentsContext: nil,
+                    authService: authService,
+                    photoIdsForSaving: nil,
+                    vkApi: vkApi,
+                    getAccessToken: { authService.accessToken ?? "" },
+                    isOwnPhotos: false,
+                    isProfileAlbum: false
+                )
+            }
+        }
         .alert("Репост в личку", isPresented: $showRepostDMStub) {
             Button("OK", role: .cancel) { }
         } message: {
             Text("Скоро. Раздел сообщений в разработке.")
         }
     }
+
+    // MARK: - Header
+
+    private func groupHeader(group: VKGroup) -> some View {
+        VStack(spacing: 0) {
+            // Аватар + имя + тип
+            HStack(alignment: .top, spacing: 14) {
+                groupAvatarView(group: group)
+                    .frame(width: 80, height: 80)
+                    .clipShape(RoundedRectangle(cornerRadius: VKTheme.Radius.avatarSquare))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(group.name ?? "Сообщество")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+
+                    let subtitle = group.activity ?? group.status ?? ""
+                    if !subtitle.isEmpty {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) { showDescription.toggle() }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(subtitle)
+                                    .font(VKTheme.TextStyle.timestamp)
+                                    .foregroundStyle(Color.white.opacity(0.6))
+                                    .lineLimit(1)
+                                if let desc = group.description, !desc.isEmpty {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(Color.white.opacity(0.6))
+                                        .rotationEffect(.degrees(showDescription ? 180 : 0))
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 2)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+
+            // Описание (раскрывается)
+            if showDescription, let desc = group.description, !desc.isEmpty {
+                Text(desc)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.white.opacity(0.85))
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.opacity)
+            }
+
+            // Кнопка "Отписаться"
+            Button {
+                leaveGroup()
+            } label: {
+                Text(leaveInProgress ? "Отписка…" : "Отписаться")
+                    .font(VKTheme.TextStyle.profileAction)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.15))
+                    .cornerRadius(VKTheme.Radius.button)
+            }
+            .buttonStyle(.plain)
+            .disabled(leaveInProgress)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+
+            // Статистика
+            groupStatsBlock(group: group)
+                .padding(.top, 10)
+
+            // Фотострип
+            if !groupPhotos.isEmpty {
+                groupPhotoStrip(photos: groupPhotos)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.bottom, 14)
+        .background(Color(hex: "#1F2B38"))
+    }
+
+    @ViewBuilder
+    private func groupAvatarView(group: VKGroup) -> some View {
+        let urlString = group.photo200 ?? group.photo100 ?? group.photo50
+        if let s = urlString, let url = URL(string: s) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image): image.resizable().scaledToFill()
+                case .failure, .empty: groupAvatarPlaceholder
+                @unknown default: EmptyView()
+                }
+            }
+        } else {
+            groupAvatarPlaceholder
+        }
+    }
+
+    private var groupAvatarPlaceholder: some View {
+        Image(systemName: "person.3.fill")
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(Color.white.opacity(0.4))
+            .padding(16)
+            .background(Color.white.opacity(0.1))
+    }
+
+    // MARK: - Статистика группы
+
+    private func groupStatsBlock(group: VKGroup) -> some View {
+        HStack(spacing: 0) {
+            groupStatCell(value: group.membersCount, label: "участников")
+            groupStatDivider
+            groupStatCell(value: totalPhotosCount, label: "фото")
+            groupStatDivider
+            groupStatCell(value: totalAudioCount, label: "аудио")
+        }
+        .frame(maxWidth: .infinity)
+        .overlay(
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(height: 1),
+            alignment: .top
+        )
+    }
+
+    private func groupStatCell(value: Int?, label: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value.map { formatStatCount($0) } ?? "—")
+                .font(VKTheme.TextStyle.statNumber)
+                .foregroundStyle(.white)
+            Text(label)
+                .font(VKTheme.TextStyle.statLabel)
+                .foregroundStyle(Color.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    private var groupStatDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.15))
+            .frame(width: 1)
+            .padding(.vertical, 8)
+    }
+
+    private func formatStatCount(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
+    }
+
+    // MARK: - Фотострип
+
+    private func groupPhotoStrip(photos: [VKPhoto]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(Array(photos.enumerated()), id: \.element.id) { index, photo in
+                    Button {
+                        galleryInitialIndex = index
+                        isGalleryPresented = true
+                    } label: {
+                        Group {
+                            if let s = photo.displayURL, let url = URL(string: s) {
+                                AsyncImage(url: url) { phase in
+                                    switch phase {
+                                    case .success(let img): img.resizable().scaledToFill()
+                                    default: Color.white.opacity(0.1)
+                                    }
+                                }
+                            } else {
+                                Color.white.opacity(0.1)
+                            }
+                        }
+                        .frame(width: 80, height: 80)
+                        .clipped()
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .frame(height: 80)
+    }
+
+    // MARK: - Посты
 
     @ViewBuilder
     private func groupWallVideoPlayerContent(url: URL) -> some View {
@@ -125,36 +336,6 @@ struct GroupWallView: View {
             )
         }
         VideoPlayerView(url: url, onDismiss: { videoPlayerURL = nil; videoPlayerPost = nil }, postContext: ctx)
-    }
-
-    private func groupHeader(group: VKGroup) -> some View {
-        HStack(spacing: 12) {
-            Group {
-                if let urlString = group.photo50, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image): image.resizable().scaledToFill()
-                        case .failure, .empty: Image(systemName: "person.3.fill").resizable().foregroundStyle(.secondary)
-                        @unknown default: EmptyView()
-                        }
-                    }
-                } else {
-                    Image(systemName: "person.3.fill")
-                        .resizable()
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 60, height: 60)
-            .clipShape(Circle())
-            Text(group.name ?? "Группа \(group.id)")
-                .font(.headline)
-            Spacer(minLength: 0)
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
-        .padding(.horizontal)
-        .padding(.vertical, 8)
     }
 
     private func groupWallPostRow(_ post: VKPost) -> some View {
@@ -226,6 +407,8 @@ struct GroupWallView: View {
         .padding(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
     }
 
+    // MARK: - Загрузка
+
     private func load() {
         guard let token = authService.accessToken else { return }
         loadState = .loading
@@ -233,13 +416,20 @@ struct GroupWallView: View {
             do {
                 async let groupTask = vkApi.getGroupById(token: token, groupId: groupId)
                 async let wallTask = vkApi.getWall(token: token, ownerId: ownerId)
+                async let photosTask = vkApi.getPhotosAll(token: token, ownerId: ownerId, count: 5)
+                async let audioTask = vkApi.getAudio(token: token, ownerId: ownerId, offset: 0, count: 1)
                 let g = try? await groupTask
                 let wall = try await wallTask
+                let photosResp = try? await photosTask
+                let audioResp = try? await audioTask
                 await MainActor.run {
                     group = g
                     posts = wall.items
                     profiles = wall.profiles ?? []
                     groups = wall.groups ?? []
+                    groupPhotos = photosResp?.items ?? []
+                    totalPhotosCount = photosResp.map { $0.count > 0 ? $0.count : nil } ?? nil
+                    totalAudioCount = audioResp.map { $0.count > 0 ? $0.count : nil } ?? nil
                     loadState = .loaded
                 }
             } catch {
@@ -247,6 +437,8 @@ struct GroupWallView: View {
             }
         }
     }
+
+    // MARK: - Лайк
 
     private func likeToggle(_ post: VKPost) {
         guard let token = authService.accessToken else { return }
@@ -259,24 +451,14 @@ struct GroupWallView: View {
             do {
                 let newCount: Int
                 if isLiked {
-                    newCount = try await vkApi.likesDelete(
-                        token: token,
-                        type: "post",
-                        ownerId: ownerId,
-                        itemId: post.id
-                    )
+                    newCount = try await vkApi.likesDelete(token: token, type: "post", ownerId: ownerId, itemId: post.id)
                     await MainActor.run {
                         postLikeOverrides[pid] = newCount
                         postLikedOverrides[pid] = false
                         likeInProgress.remove(pid)
                     }
                 } else {
-                    newCount = try await vkApi.likesAdd(
-                        token: token,
-                        type: "post",
-                        ownerId: ownerId,
-                        itemId: post.id
-                    )
+                    newCount = try await vkApi.likesAdd(token: token, type: "post", ownerId: ownerId, itemId: post.id)
                     await MainActor.run {
                         postLikeOverrides[pid] = newCount
                         postLikedOverrides[pid] = true
@@ -288,6 +470,8 @@ struct GroupWallView: View {
             }
         }
     }
+
+    // MARK: - Репост
 
     private func repostToWall(_ post: VKPost) {
         guard let token = authService.accessToken else { return }
@@ -312,23 +496,7 @@ struct GroupWallView: View {
         }
     }
 
-    private func addPhotoToSaved(token: String, ownerId: Int, photoId: Int, accessKey: String? = nil) async -> Bool {
-        let t = token
-        let o = ownerId
-        let p = photoId
-        let a = accessKey ?? ""
-        guard !t.isEmpty else {
-            AppLogger.shared.error("Gallery", "addPhotoToSaved: empty token")
-            return false
-        }
-        do {
-            _ = try await vkApi.photosCopy(token: t, ownerId: o, photoId: p, accessKey: a)
-            return true
-        } catch {
-            AppLogger.shared.error("Gallery", "addPhotoToSaved failed ownerId=\(o) photoId=\(p)", error: error)
-            return false
-        }
-    }
+    // MARK: - Отписка
 
     private func leaveGroup() {
         guard let token = authService.accessToken, !token.isEmpty else {
