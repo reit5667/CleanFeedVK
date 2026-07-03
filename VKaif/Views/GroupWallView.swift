@@ -20,7 +20,6 @@ struct GroupWallView: View {
     @State private var isGalleryPresented = false
     @State private var loadState: GroupWallLoadState = .idle
     @State private var showDescription = false
-    @State private var leaveInProgress = false
     @State private var leaveError: String? = nil
     @State private var commentsContext: PostCommentsContext? = nil
     @State private var postLikeOverrides: [String: Int] = [:]
@@ -81,13 +80,19 @@ struct GroupWallView: View {
             }
         }
         .onAppear { load() }
-        .alert("Ошибка отписки", isPresented: Binding(
+        .alert("Отписаться от сообщества", isPresented: Binding(
             get: { leaveError != nil },
             set: { if !$0 { leaveError = nil } }
         )) {
-            Button("OK", role: .cancel) { leaveError = nil }
+            Button("Открыть ВКонтакте") {
+                leaveError = nil
+                if let url = URL(string: "https://vk.com/club\(groupId)") {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Отмена", role: .cancel) { leaveError = nil }
         } message: {
-            if let msg = leaveError { Text(msg) }
+            Text("Отписка через сторонние приложения недоступна из-за ограничений ВКонтакте. Вы можете отписаться в официальном приложении или на сайте.")
         }
         .sheet(item: $commentsContext) { ctx in
             PostCommentsView(context: ctx, authService: authService)
@@ -186,7 +191,7 @@ struct GroupWallView: View {
             Button {
                 leaveGroup()
             } label: {
-                Text(leaveInProgress ? "Отписка…" : "Отписаться")
+                Text("Отписаться")
                     .font(VKTheme.TextStyle.profileAction)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -195,7 +200,6 @@ struct GroupWallView: View {
                     .cornerRadius(VKTheme.Radius.button)
             }
             .buttonStyle(.plain)
-            .disabled(leaveInProgress)
             .padding(.horizontal, 16)
             .padding(.top, 14)
 
@@ -499,25 +503,6 @@ struct GroupWallView: View {
     // MARK: - Отписка
 
     private func leaveGroup() {
-        guard let token = authService.accessToken, !token.isEmpty else {
-            leaveError = "Нет доступа. Войдите снова."
-            return
-        }
-        leaveInProgress = true
-        Task {
-            do {
-                try await vkApi.leaveGroup(token: token, groupId: groupId)
-                await MainActor.run {
-                    leaveInProgress = false
-                    onLeaveSuccess?()
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    leaveInProgress = false
-                    leaveError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                }
-            }
-        }
+        leaveError = "unavailable"
     }
 }

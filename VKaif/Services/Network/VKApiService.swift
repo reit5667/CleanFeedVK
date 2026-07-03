@@ -219,7 +219,8 @@ final class VKApiService: Sendable {
             URLQueryItem(name: "count", value: String(count)),
             URLQueryItem(name: "offset", value: String(offset)),
             URLQueryItem(name: "rev", value: String(rev)),
-            URLQueryItem(name: "extended", value: "1")
+            URLQueryItem(name: "extended", value: "1"),
+            URLQueryItem(name: "photo_sizes", value: "1")
         ]
         guard var components = URLComponents(string: "\(baseURL)/photos.get") else { throw VKApiError.invalidURL }
         components.queryItems = queryItems

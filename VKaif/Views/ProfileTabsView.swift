@@ -52,7 +52,6 @@ struct ProfileWallTabView: View {
                             Divider()
                         }
                     }
-                    .padding(.horizontal)
                     if embeddedInScroll {
                         wallContent
                     } else {
@@ -320,7 +319,7 @@ struct ProfileWallTabView: View {
     }
 }
 
-// MARK: - Вкладка «Фото»: альбомы + Сохранённые (данные передаются из ProfileView)
+// MARK: - Вкладка «Фото»: ФОТО (все фото) + АЛЬБОМЫ (сетка 2-в-ряд)
 
 struct ProfilePhotoTabView: View {
     let albums: [VKAlbum]
@@ -332,84 +331,264 @@ struct ProfilePhotoTabView: View {
     var onRefresh: () async -> Void
 
     private static let savedAlbumId = -15
-    /// VK: фото профиля (стена).
     private static let profileAlbumId = -6
 
+    private enum PhotoTab { case photos, albums }
+    @State private var activeTab: PhotoTab = .photos
+
+    @State private var allPhotos: [VKPhoto] = []
+    @State private var photosLoadState: ProfileTabLoadState = .idle
+    @State private var galleryIndex: Int = 0
+    @State private var isGalleryPresented = false
+    @State private var pendingAlbumDest: AlbumDestination? = nil
+    @State private var navigateToAlbum = false
+
+    private let vkApi = VKApiService()
+    private let albumColumns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 2)
+    private let photoColumns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
+
     var body: some View {
-        Group {
-            switch loadState {
-            case .idle, .loading:
-                ProgressView("Загрузка альбомов…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .loaded:
-                List {
-                    Section {
-                        NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.savedAlbumId, title: "Сохранённые фото", isOwnProfile: isOwnProfile)) {
-                            Label("Сохранённые фото", systemImage: "square.and.arrow.down.fill")
-                        }
-                        NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: Self.profileAlbumId, title: "Фото профиля", isOwnProfile: isOwnProfile)) {
-                            Label("Фото профиля", systemImage: "person.crop.rectangle.stack")
-                        }
-                    }
-                    Section("Альбомы") {
-                        ForEach(albums, id: \.id) { album in
-                            NavigationLink(value: AlbumDestination(ownerId: ownerId, albumId: album.id, title: album.title, isOwnProfile: isOwnProfile)) {
-                                HStack(spacing: 12) {
-                                    albumThumb(album)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(album.title)
-                                            .font(.body)
-                                        Text("\(album.size) фото")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .listStyle(.insetGrouped)
-            case .failed(let error):
-                ContentUnavailableView(
-                    "Ошибка загрузки альбомов",
-                    systemImage: "exclamationmark.triangle.fill",
-                    description: Text("\(error.localizedDescription)\n\nПерелогиньтесь (Выйти → Войти) и выдайте права: друзья, фото, группы.")
-                )
+        VStack(spacing: 0) {
+            // Скрытый NavigationLink — единственная точка входа для навигации в альбом.
+            // Button в LazyVGrid устанавливает pendingAlbumDest, что активирует этот link.
+            NavigationLink(
+                destination: pendingAlbumDest.map { dest in
+                    AlbumPhotosView(
+                        authService: authService,
+                        ownerId: dest.ownerId,
+                        albumId: dest.albumId,
+                        albumTitle: dest.title,
+                        isOwnProfile: dest.isOwnProfile,
+                        onAlbumListChanged: onRefresh
+                    )
+                },
+                isActive: $navigateToAlbum
+            ) { EmptyView() }
+            .hidden()
+
+            Picker("", selection: $activeTab) {
+                Text("ФОТО").tag(PhotoTab.photos)
+                Text("АЛЬБОМЫ").tag(PhotoTab.albums)
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            Group {
+                if activeTab == .photos {
+                    photosContent
+                } else {
+                    albumsContent
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .refreshable { await onRefresh() }
-        .navigationDestination(for: AlbumDestination.self) { dest in
-            AlbumPhotosView(
+        .onChange(of: activeTab) { _, tab in
+            if tab == .photos, case .idle = photosLoadState { loadAllPhotos() }
+        }
+        .onAppear {
+            if case .idle = photosLoadState { loadAllPhotos() }
+        }
+        .refreshable {
+            if activeTab == .photos { loadAllPhotos() }
+            else { await onRefresh() }
+        }
+        .fullScreenCover(isPresented: $isGalleryPresented) {
+            let urls = allPhotos.compactMap { $0.displayURL }.compactMap { URL(string: $0) }
+            FullScreenPhotoGalleryView(
+                urls: urls,
+                initialIndex: galleryIndex,
+                onDismiss: { isGalleryPresented = false },
                 authService: authService,
-                ownerId: dest.ownerId,
-                albumId: dest.albumId,
-                albumTitle: dest.title,
-                isOwnProfile: dest.isOwnProfile,
-                onAlbumListChanged: onRefresh
+                photoIdsForSaving: allPhotos.compactMap { p in
+                    guard let oid = p.ownerId else { return nil }
+                    return PhotoSaveId(ownerId: oid, photoId: p.id, accessKey: p.accessKey)
+                },
+                vkApi: vkApi,
+                getAccessToken: { authService.accessToken ?? "" },
+                initialAccessToken: authService.accessToken ?? ""
             )
         }
     }
 
-    private func albumThumb(_ album: VKAlbum) -> some View {
-        Group {
-            if let urlString = album.thumbURL, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    case .failure, .empty: Image(systemName: "photo").resizable().scaledToFit().foregroundStyle(.secondary)
-                    @unknown default: EmptyView()
+    // MARK: - ФОТО tab
+
+    @ViewBuilder
+    private var photosContent: some View {
+        switch photosLoadState {
+        case .idle, .loading:
+            ProgressView("Загрузка фото…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loaded:
+            if allPhotos.isEmpty {
+                ContentUnavailableView("Нет фотографий", systemImage: "photo")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: photoColumns, spacing: 2) {
+                        ForEach(Array(allPhotos.enumerated()), id: \.element.id) { idx, photo in
+                            photoCell(photo: photo, index: idx)
+                        }
                     }
                 }
-            } else {
-                Image(systemName: "photo")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(.secondary)
+            }
+        case .failed(let error):
+            ContentUnavailableView(
+                "Ошибка загрузки фото",
+                systemImage: "exclamationmark.triangle.fill",
+                description: Text(error.localizedDescription)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func photoCell(photo: VKPhoto, index: Int) -> some View {
+        let urlString = photo.thumbnailDisplayURL ?? photo.displayURL
+        return GeometryReader { geo in
+            Group {
+                if let s = urlString, let url = URL(string: s) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img): img.resizable().scaledToFill()
+                        case .failure, .empty: Color(.systemGray5)
+                        @unknown default: EmptyView()
+                        }
+                    }
+                } else {
+                    Color(.systemGray5)
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.width)
+            .clipped()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                galleryIndex = index
+                isGalleryPresented = true
             }
         }
-        .frame(width: 56, height: 56)
-        .clipped()
-        .cornerRadius(8)
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    // MARK: - АЛЬБОМЫ tab
+
+    @ViewBuilder
+    private var albumsContent: some View {
+        switch loadState {
+        case .idle, .loading:
+            ProgressView("Загрузка альбомов…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loaded:
+            ScrollView {
+                LazyVGrid(columns: albumColumns, spacing: 2) {
+                    albumGridCell(
+                        destination: AlbumDestination(ownerId: ownerId, albumId: Self.savedAlbumId, title: "Сохранённые фото", isOwnProfile: isOwnProfile),
+                        thumbURL: nil,
+                        title: "Сохранённые фото",
+                        count: nil,
+                        systemIcon: "square.and.arrow.down.fill"
+                    )
+                    albumGridCell(
+                        destination: AlbumDestination(ownerId: ownerId, albumId: Self.profileAlbumId, title: "Фото профиля", isOwnProfile: isOwnProfile),
+                        thumbURL: nil,
+                        title: "Фото профиля",
+                        count: nil,
+                        systemIcon: "person.crop.rectangle.stack"
+                    )
+                    ForEach(albums, id: \.id) { album in
+                        albumGridCell(
+                            destination: AlbumDestination(ownerId: ownerId, albumId: album.id, title: album.title, isOwnProfile: isOwnProfile),
+                            thumbURL: album.thumbURL,
+                            title: album.title,
+                            count: album.size
+                        )
+                    }
+                }
+                .padding(2)
+            }
+        case .failed(let error):
+            ContentUnavailableView(
+                "Ошибка загрузки альбомов",
+                systemImage: "exclamationmark.triangle.fill",
+                description: Text("\(error.localizedDescription)\n\nПерелогиньтесь (Выйти → Войти) и выдайте права: друзья, фото, группы.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func albumGridCell(
+        destination: AlbumDestination,
+        thumbURL: String?,
+        title: String,
+        count: Int?,
+        systemIcon: String? = nil
+    ) -> some View {
+        Button {
+            pendingAlbumDest = destination
+            navigateToAlbum = true
+        } label: {
+        VStack(alignment: .leading, spacing: 4) {
+                GeometryReader { geo in
+                    Group {
+                        if let url = thumbURL.flatMap({ URL(string: $0) }) {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let img): img.resizable().scaledToFill()
+                                case .failure, .empty: albumThumbPlaceholder(icon: systemIcon)
+                                @unknown default: EmptyView()
+                                }
+                            }
+                        } else {
+                            albumThumbPlaceholder(icon: systemIcon)
+                        }
+                    }
+                    .frame(width: geo.size.width, height: geo.size.width)
+                    .clipped()
+                }
+                .aspectRatio(1, contentMode: .fit)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                    if let count {
+                        Text("\(count) фото")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.bottom, 8)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func albumThumbPlaceholder(icon: String?) -> some View {
+        ZStack {
+            Color(.systemGray5)
+            Image(systemName: icon ?? "photo")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Load
+
+    private func loadAllPhotos() {
+        guard let token = authService.accessToken, !token.isEmpty else { return }
+        photosLoadState = .loading
+        Task {
+            do {
+                let res = try await vkApi.getPhotosAll(token: token, ownerId: ownerId, count: 200)
+                await MainActor.run {
+                    allPhotos = res.items
+                    photosLoadState = .loaded
+                }
+            } catch {
+                await MainActor.run { photosLoadState = .failed(error) }
+            }
+        }
     }
 }
 

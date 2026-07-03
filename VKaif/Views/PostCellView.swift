@@ -22,8 +22,6 @@ struct PollVoteOverride {
 
 // MARK: - Ячейка поста ленты
 
-/// Максимальная ширина поста: экран минус отступы (LazyVStack .padding .horizontal 16×2 + паддинг ячейки 16×2).
-private let postMaxWidth: CGFloat = (UIScreen.main.bounds.width - 64).rounded(.down)
 
 /// Заголовок: аватар, имя, относительная дата. Тело: текст с «Показать ещё». Медиа: сетка фото (1–10).
 struct PostCellView: View {
@@ -199,10 +197,15 @@ struct PostCellView: View {
     }
 
     private var postBodyContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             header
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 10)
             if !post.text.isEmpty {
                 bodyText
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
             }
             if !photoGridItems.isEmpty {
                 photoGridView
@@ -212,24 +215,32 @@ struct PostCellView: View {
             }
             if !linkAttachments.isEmpty {
                 linkRow
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
             }
             if !pollAttachments.isEmpty {
                 pollRow
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
             }
             if hasOtherMedia {
                 mediaPlaceholder
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
             }
             if let repost = post.copyHistory?.first {
                 repostBlock(repost)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
             }
             if displayLikesCount > 0 || onLike != nil || post.commentsCount > 0 || onTapComments != nil || displayRepostsCount > 0 || onRepostToWall != nil {
                 likesCommentsRow
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
             }
         }
-        .frame(maxWidth: postMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .center)
         .background(VKTheme.Colors.background)
         .overlay(
             Rectangle()
@@ -427,72 +438,67 @@ struct PostCellView: View {
     private let gridCellHeight: CGFloat = 120
 
     // MARK: Пазл-раскладка фото
-    // 1 фото → полная ширина; 2 → два столбца; 3 → три столбца;
-    // 4 → 2×2; 5 → 2+3; 6 → 3+3; 7+ → первые 6 + счётчик «+N» на последней ячейке.
+    // 1 → полная ширина; 2 → 2 в ряд; 3 → 1+2; 4 → 2+2; 5 → 2+3; 6 → 3+3; 7 → 1+3+3; 8 → 2+3+3; 9 → 3+3+3; 10+ → 3+3+3 + счётчик.
 
     @ViewBuilder
     private var photoGridView: some View {
         let all   = photoGridItems
         let total = all.count
-        let shown = min(total, 6)
+        let shown = min(total, 9)
         let extra = total - shown
         let items = Array(all.prefix(shown))
         let h     = gridCellHeight
 
-        switch shown {
-        case 1:
-            singlePhotoCell(items[0])
-        case 2:
-            HStack(spacing: 4) {
+        VStack(spacing: 4) {
+            switch shown {
+            case 1:
+                singlePhotoCell(items[0])
+            case 2:
+                row2(items[0], items[1], h: h, extra2: extra)
+            case 3:
                 gridCell(items[0], height: h, extra: 0)
-                gridCell(items[1], height: h, extra: 0)
-            }
-        case 3:
-            // Одно большое слева + два маленьких справа
-            HStack(alignment: .top, spacing: 4) {
-                gridCell(items[0], height: h * 2 + 4, extra: 0)
-                VStack(spacing: 4) {
-                    gridCell(items[1], height: h, extra: 0)
-                    gridCell(items[2], height: h, extra: 0)
-                }
-            }
-        case 4:
-            VStack(spacing: 4) {
-                HStack(spacing: 4) {
-                    gridCell(items[0], height: h, extra: 0)
-                    gridCell(items[1], height: h, extra: 0)
-                }
-                HStack(spacing: 4) {
-                    gridCell(items[2], height: h, extra: 0)
-                    gridCell(items[3], height: h, extra: 0)
-                }
-            }
-        case 5:
-            VStack(spacing: 4) {
-                HStack(spacing: 4) {
-                    gridCell(items[0], height: h, extra: 0)
-                    gridCell(items[1], height: h, extra: 0)
-                }
-                HStack(spacing: 4) {
-                    gridCell(items[2], height: h, extra: 0)
-                    gridCell(items[3], height: h, extra: 0)
-                    gridCell(items[4], height: h, extra: extra)
-                }
-            }
-        default: // 6
-            VStack(spacing: 4) {
-                HStack(spacing: 4) {
-                    gridCell(items[0], height: h, extra: 0)
-                    gridCell(items[1], height: h, extra: 0)
-                    gridCell(items[2], height: h, extra: 0)
-                }
-                HStack(spacing: 4) {
-                    gridCell(items[3], height: h, extra: 0)
-                    gridCell(items[4], height: h, extra: 0)
-                    gridCell(items[5], height: h, extra: extra)
-                }
+                row2(items[1], items[2], h: h, extra2: extra)
+            case 4:
+                row2(items[0], items[1], h: h, extra2: 0)
+                row2(items[2], items[3], h: h, extra2: extra)
+            case 5:
+                row2(items[0], items[1], h: h, extra2: 0)
+                row3(items[2], items[3], items[4], h: h, extra3: extra)
+            case 6:
+                row3(items[0], items[1], items[2], h: h, extra3: 0)
+                row3(items[3], items[4], items[5], h: h, extra3: extra)
+            case 7:
+                gridCell(items[0], height: h, extra: 0)
+                row3(items[1], items[2], items[3], h: h, extra3: 0)
+                row3(items[4], items[5], items[6], h: h, extra3: extra)
+            case 8:
+                row2(items[0], items[1], h: h, extra2: 0)
+                row3(items[2], items[3], items[4], h: h, extra3: 0)
+                row3(items[5], items[6], items[7], h: h, extra3: extra)
+            default: // 9
+                row3(items[0], items[1], items[2], h: h, extra3: 0)
+                row3(items[3], items[4], items[5], h: h, extra3: 0)
+                row3(items[6], items[7], items[8], h: h, extra3: extra)
             }
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func row2(_ a: PhotoGridItem, _ b: PhotoGridItem, h: CGFloat, extra2: Int) -> some View {
+        HStack(spacing: 4) {
+            gridCell(a, height: h, extra: 0)
+            gridCell(b, height: h, extra: extra2)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func row3(_ a: PhotoGridItem, _ b: PhotoGridItem, _ c: PhotoGridItem, h: CGFloat, extra3: Int) -> some View {
+        HStack(spacing: 4) {
+            gridCell(a, height: h, extra: 0)
+            gridCell(b, height: h, extra: 0)
+            gridCell(c, height: h, extra: extra3)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     /// Одиночное фото в посте: scaledToFit без обрезки, высота по содержимому (max singlePhotoMaxHeight).
@@ -576,70 +582,93 @@ struct PostCellView: View {
         .allowsHitTesting(item.galleryIndex != nil || extra == 0)
     }
 
-    /// Строка видео: превью или плейсхолдер, тап → onTapVideo (плеер). Сетка по центру.
+    /// Строка видео: одно видео — на всю ширину 16:9; несколько — 2-column grid.
     @ViewBuilder
     private var videoRow: some View {
         let count = videoAttachments.count
-        let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
-        let grid = LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(Array(videoAttachments.enumerated()), id: \.offset) { _, pair in
-                videoCard(video: pair.video, ownerId: pair.ownerId)
+        if count == 1, let pair = videoAttachments.first {
+            videoCard(video: pair.video, ownerId: pair.ownerId, fullWidth: true)
+        } else {
+            let columns = [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)]
+            LazyVGrid(columns: columns, spacing: 4) {
+                ForEach(Array(videoAttachments.enumerated()), id: \.offset) { _, pair in
+                    videoCard(video: pair.video, ownerId: pair.ownerId, fullWidth: false)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 4)
         }
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            grid
-                .frame(maxWidth: count <= 2 ? (count == 1 ? 180 : 280) : nil)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity)
     }
 
-    private func videoCard(video: VKVideo, ownerId: Int) -> some View {
+    private func videoCard(video: VKVideo, ownerId: Int, fullWidth: Bool) -> some View {
         let previewURL = video.previewImageURL
+        let cardHeight: CGFloat = fullWidth
+            ? (UIScreen.main.bounds.width * 9 / 16).rounded()
+            : 120
         return Button {
             Task { await onTapVideo?(video, ownerId, post) }
         } label: {
-            ZStack(alignment: .center) {
-                if let urlString = previewURL, let url = URL(string: urlString) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fill)
-                        case .failure, .empty:
-                            videoPlaceholderContent(duration: video.duration)
-                        @unknown default:
-                            videoPlaceholderContent(duration: video.duration)
+            ZStack(alignment: .bottom) {
+                // Превью
+                Group {
+                    if let urlString = previewURL, let url = URL(string: urlString) {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().aspectRatio(contentMode: .fill)
+                            default:
+                                Color(.systemGray4)
+                            }
                         }
+                    } else {
+                        Color(.systemGray4)
                     }
-                } else {
-                    videoPlaceholderContent(duration: video.duration)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // Нижняя плашка: название + длительность
+                HStack(spacing: 4) {
+                    if let title = video.title, !title.isEmpty {
+                        Text(title)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    if let sec = video.duration {
+                        Text(formatDuration(sec))
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 2)
+                            .background(Color.black.opacity(0.6))
+                            .cornerRadius(3)
+                    }
+                }
+                .padding(8)
+                .background(
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.55)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+                // Кнопка play по центру
                 Image(systemName: "play.circle.fill")
-                    .font(.system(size: 44))
+                    .font(.system(size: fullWidth ? 52 : 36))
                     .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    .shadow(color: .black.opacity(0.45), radius: 3, x: 0, y: 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(height: 160)
+            .frame(height: cardHeight)
             .frame(maxWidth: .infinity)
             .clipped()
         }
         .buttonStyle(.plain)
         .disabled(onTapVideo == nil)
-    }
-
-    private func videoPlaceholderContent(duration: Int?) -> some View {
-        VStack(spacing: 4) {
-            if let sec = duration {
-                Text(formatDuration(sec))
-                    .font(.caption)
-                    .foregroundColor(.white)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGray4))
     }
 
     private func formatDuration(_ seconds: Int) -> String {

@@ -384,10 +384,10 @@ struct ContentView: View {
                     if isLoadingMore {
                         ProgressView("Ещё посты…")
                             .frame(maxWidth: .infinity)
+                            .padding(.horizontal)
                             .padding(.vertical, 16)
                     }
                 }
-                .padding(.horizontal)
             }
             .refreshable {
                 feedScrollToTopTrigger += 1

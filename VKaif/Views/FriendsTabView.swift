@@ -6,6 +6,7 @@ struct FriendsTabView: View {
 
     enum Segment: String, CaseIterable {
         case all = "Все"
+        case online = "В сети"
         case outgoing = "Исходящие"
         case incoming = "Входящие"
         case suggestions = "Возможные"
@@ -14,6 +15,7 @@ struct FriendsTabView: View {
     @State private var segment: Segment = .all
     @State private var searchText = ""
     @State private var friends: [VKFriend] = []
+    @State private var onlineFriends: [VKFriend] = []
     @State private var outgoingUsers: [VKUserDetail] = []
     @State private var incomingUsers: [VKUserDetail] = []
     @State private var suggestions: [VKFriend] = []
@@ -40,7 +42,7 @@ struct FriendsTabView: View {
             .padding(.vertical, 8)
             .onChange(of: segment) { _, _ in loadSegment() }
 
-            if segment == .all {
+            if segment == .all || segment == .online {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
@@ -119,6 +121,7 @@ struct FriendsTabView: View {
     private var emptyTitle: String {
         switch segment {
         case .all: return "Нет друзей"
+        case .online: return "Никого нет в сети"
         case .outgoing: return "Нет исходящих заявок"
         case .incoming: return "Нет входящих заявок"
         case .suggestions: return "Нет рекомендаций"
@@ -135,6 +138,9 @@ struct FriendsTabView: View {
         switch segment {
         case .all:
             return friends.filter { searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(searchText) }
+                .map { DisplayItem(userId: $0.id, name: $0.displayName, photoURL: $0.photo50) }
+        case .online:
+            return onlineFriends.filter { searchText.isEmpty || $0.displayName.localizedCaseInsensitiveContains(searchText) }
                 .map { DisplayItem(userId: $0.id, name: $0.displayName, photoURL: $0.photo50) }
         case .outgoing:
             return outgoingUsers.map { DisplayItem(userId: $0.id, name: $0.displayName, photoURL: $0.avatarURL) }
@@ -175,9 +181,15 @@ struct FriendsTabView: View {
             do {
                 switch segment {
                 case .all:
-                    let res = try await vkApi.getFriends(token: token, count: 5000, offset: 0)
+                    let res = try await vkApi.getFriends(token: token, count: 5000, offset: 0, fields: "photo_50,online")
                     await MainActor.run {
                         friends = res.items
+                        loadState = .loaded
+                    }
+                case .online:
+                    let res = try await vkApi.getFriends(token: token, count: 5000, offset: 0, fields: "photo_50,online")
+                    await MainActor.run {
+                        onlineFriends = res.items.filter { $0.isOnline }
                         loadState = .loaded
                     }
                 case .outgoing:
